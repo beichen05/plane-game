@@ -3,30 +3,53 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreElement = document.getElementById('score');
 
+// 图片加载计数
+let loadedImages = 0;
+const totalImages = 2;
+
 // 加载图片
 const playerImg = new Image();
 const monsterImg = new Image();
+
+// 图片加载处理
+function handleImageLoad() {
+    loadedImages++;
+    if (loadedImages === totalImages) {
+        // 所有图片加载完成，开始游戏
+        startGame();
+    }
+}
+
+playerImg.onload = handleImageLoad;
+monsterImg.onload = handleImageLoad;
+
+// 设置图片源
 playerImg.src = 'tu/0.jpg';
 monsterImg.src = 'tu/1.jpg';
 
 // 设置画布大小为屏幕大小
 function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const screenWidth = window.innerWidth || document.documentElement.clientWidth;
+    const screenHeight = window.innerHeight || document.documentElement.clientHeight;
+    const scale = Math.min(screenWidth / 800, screenHeight / 600);
+    
+    canvas.width = Math.min(800, screenWidth);
+    canvas.height = Math.min(600, screenHeight);
+    
     // 更新玩家初始位置
-    player.x = canvas.width / 2 - player.width / 2;
-    player.y = canvas.height - player.height - 20;
+    if (!player.initialized) {
+        player.x = canvas.width / 2 - player.width / 2;
+        player.y = canvas.height - player.height - 20;
+        player.initialized = true;
+    }
 }
-
-// 监听屏幕大小变化
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
 
 // 游戏状态
 let score = 0;
 let gameOver = false;
 let lastShootTime = 0;
 const shootInterval = 250; // 射击间隔（毫秒）
+let gameStarted = false;
 
 // 触摸控制变量
 let touchX = null;
@@ -35,11 +58,12 @@ let shootingInterval = null;
 
 // 玩家飞机
 const player = {
-    x: canvas.width / 2,
-    y: canvas.height - 70,
+    x: 0,
+    y: 0,
     width: 50,
     height: 50,
     speed: 5,
+    initialized: false,
     draw() {
         ctx.drawImage(playerImg, this.x, this.y, this.width, this.height);
     }
@@ -76,45 +100,21 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
-// 添加触摸事件监听
-canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    touchX = touch.clientX;
+// 开始游戏函数
+function startGame() {
+    if (gameStarted) return;
+    gameStarted = true;
     
-    // 开始连续射击
-    if (!isShooting) {
-        isShooting = true;
-        shootingInterval = setInterval(shoot, shootInterval);
-    }
-});
-
-canvas.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const newTouchX = touch.clientX;
+    // 监听屏幕大小变化
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
     
-    // 移动飞机
-    const deltaX = newTouchX - touchX;
-    if (deltaX > 0 && player.x < canvas.width - player.width) {
-        player.x = Math.min(player.x + player.speed, canvas.width - player.width);
-    } else if (deltaX < 0 && player.x > 0) {
-        player.x = Math.max(player.x - player.speed, 0);
-    }
+    // 开始游戏循环
+    gameLoop();
     
-    touchX = newTouchX;
-});
-
-canvas.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    touchX = null;
-    
-    // 停止连续射击
-    if (isShooting) {
-        isShooting = false;
-        clearInterval(shootingInterval);
-    }
-});
+    // 创建怪兽定时器
+    setInterval(createMonster, 1000);
+}
 
 // 创建怪兽
 function createMonster() {
@@ -131,9 +131,6 @@ function createMonster() {
     };
     monsters.push(monster);
 }
-
-// 每秒创建一个怪兽
-setInterval(createMonster, 1000);
 
 // 发射子弹
 function shoot() {
@@ -189,7 +186,7 @@ function createExplosion(x, y) {
 
 // 更新游戏状态
 function update() {
-    if (gameOver) return;
+    if (gameOver || !gameStarted) return;
 
     // 键盘控制（保留原有的键盘控制，以支持桌面端）
     if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
@@ -235,6 +232,11 @@ function draw() {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    if (!gameStarted) {
+        // 显示加载中
+        return;
+    }
+
     // 绘制星空背景
     ctx.fillStyle = '#ffffff';
     for (let i = 0; i < 100; i++) {
@@ -275,4 +277,48 @@ function gameLoop() {
 }
 
 // 开始游戏
-gameLoop(); 
+gameLoop();
+
+// 添加微信特定的触摸事件处理
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (!gameStarted) return;
+    
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    touchX = touch.clientX - rect.left;
+    
+    if (!isShooting) {
+        isShooting = true;
+        shoot();
+        shootingInterval = setInterval(shoot, shootInterval);
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (!gameStarted) return;
+    
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const newTouchX = touch.clientX - rect.left;
+    
+    const deltaX = newTouchX - touchX;
+    if (deltaX > 0 && player.x < canvas.width - player.width) {
+        player.x = Math.min(player.x + player.speed, canvas.width - player.width);
+    } else if (deltaX < 0 && player.x > 0) {
+        player.x = Math.max(player.x - player.speed, 0);
+    }
+    
+    touchX = newTouchX;
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    touchX = null;
+    
+    if (isShooting) {
+        isShooting = false;
+        clearInterval(shootingInterval);
+    }
+}, { passive: false }); 
