@@ -5,11 +5,12 @@ const scoreElement = document.getElementById('score');
 
 // 图片加载计数
 let loadedImages = 0;
-const totalImages = 2;
+const totalImages = 3; // 增加了BOSS图片
 
 // 加载图片
 const playerImg = new Image();
 const monsterImg = new Image();
+const bossImg = new Image();
 
 // 图片加载处理
 function handleImageLoad() {
@@ -22,10 +23,12 @@ function handleImageLoad() {
 
 playerImg.onload = handleImageLoad;
 monsterImg.onload = handleImageLoad;
+bossImg.onload = handleImageLoad;
 
 // 设置图片源
 playerImg.src = 'tu/0.jpg';
 monsterImg.src = 'tu/1.jpg';
+bossImg.src = 'tu/5.jpg';
 
 // 设置画布大小为屏幕大小
 function resizeCanvas() {
@@ -76,6 +79,49 @@ const bulletSpeed = 7;
 // 怪兽数组
 let monsters = [];
 const monsterSpeed = 2;
+
+// BOSS类
+const boss = {
+    x: 0,
+    y: -100,
+    width: 100,
+    height: 100,
+    health: 100,
+    active: false,
+    speed: 2,
+    shootInterval: 1000,
+    lastShoot: 0,
+    draw() {
+        if (!this.active) return;
+        ctx.drawImage(bossImg, this.x, this.y, this.width, this.height);
+        // 绘制血条
+        ctx.fillStyle = 'red';
+        ctx.fillRect(this.x, this.y - 10, this.width * (this.health / 100), 5);
+    },
+    shoot() {
+        if (!this.active) return;
+        const now = Date.now();
+        if (now - this.lastShoot > this.shootInterval) {
+            this.lastShoot = now;
+            bossBullets.push({
+                x: this.x + this.width / 2,
+                y: this.y + this.height,
+                width: 8,
+                height: 20,
+                speed: 5
+            });
+        }
+    },
+    reset() {
+        this.health = 100;
+        this.active = false;
+        this.x = canvas.width / 2 - this.width / 2;
+        this.y = -100;
+    }
+};
+
+// BOSS子弹数组
+let bossBullets = [];
 
 // 控制状态
 const keys = {
@@ -184,9 +230,76 @@ function createExplosion(x, y) {
     ctx.fill();
 }
 
+// 重新开始按钮
+const restartButton = {
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 50,
+    draw() {
+        if (!gameOver) return;
+        
+        this.x = canvas.width / 2 - this.width / 2;
+        this.y = canvas.height / 2 + 100;
+        
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('重新开始', canvas.width / 2, this.y + 33);
+    },
+    isClicked(touchX, touchY) {
+        return gameOver &&
+               touchX >= this.x && touchX <= this.x + this.width &&
+               touchY >= this.y && touchY <= this.y + this.height;
+    }
+};
+
+// 重置游戏
+function resetGame() {
+    score = 0;
+    gameOver = false;
+    bullets = [];
+    monsters = [];
+    bossBullets = [];
+    boss.reset();
+    player.x = canvas.width / 2 - player.width / 2;
+    player.y = canvas.height - player.height - 20;
+    scoreElement.textContent = '0';
+}
+
 // 更新游戏状态
 function update() {
     if (gameOver || !gameStarted) return;
+
+    // 检查是否需要激活BOSS
+    if (score >= 100 && !boss.active) {
+        boss.active = true;
+        boss.x = canvas.width / 2 - boss.width / 2;
+        boss.y = 50;
+    }
+
+    // 更新BOSS
+    if (boss.active) {
+        // BOSS左右移动
+        boss.x += Math.sin(Date.now() / 1000) * boss.speed;
+        boss.shoot();
+        
+        // 更新BOSS子弹
+        bossBullets = bossBullets.filter(bullet => {
+            bullet.y += bullet.speed;
+            
+            // 检查是否击中玩家
+            if (checkCollision(bullet, player)) {
+                gameOver = true;
+                createExplosion(player.x + player.width / 2, player.y + player.height / 2);
+                return false;
+            }
+            
+            return bullet.y < canvas.height;
+        });
+    }
 
     // 键盘控制（保留原有的键盘控制，以支持桌面端）
     if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
@@ -198,6 +311,18 @@ function update() {
     // 更新子弹位置
     bullets = bullets.filter(bullet => {
         bullet.y -= bulletSpeed;
+        
+        // 检查是否击中BOSS
+        if (boss.active && checkCollision(bullet, boss)) {
+            boss.health -= 10;
+            if (boss.health <= 0) {
+                boss.active = false;
+                score += 50;
+                scoreElement.textContent = score;
+            }
+            return false;
+        }
+        
         return bullet.y > 0;
     });
 
@@ -253,9 +378,21 @@ function draw() {
 
     // 绘制子弹
     bullets.forEach(bullet => bullet.draw());
+    
+    // 绘制BOSS子弹
+    bossBullets.forEach(bullet => {
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+    });
 
     // 绘制怪兽
     monsters.forEach(monster => monster.draw());
+    
+    // 绘制BOSS
+    boss.draw();
+
+    // 绘制重新开始按钮
+    restartButton.draw();
 
     // 游戏结束显示
     if (gameOver) {
@@ -265,7 +402,6 @@ function draw() {
         ctx.fillText('游戏结束!', canvas.width / 2, canvas.height / 2);
         ctx.font = '24px Arial';
         ctx.fillText('最终得分: ' + score, canvas.width / 2, canvas.height / 2 + 40);
-        ctx.fillText('按F5重新开始', canvas.width / 2, canvas.height / 2 + 80);
     }
 }
 
@@ -286,7 +422,13 @@ canvas.addEventListener('touchstart', function(e) {
     
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    touchX = touch.clientX - rect.left;
+    const touchX = touch.clientX - rect.left;
+    const touchY = touch.clientY - rect.top;
+    
+    if (restartButton.isClicked(touchX, touchY)) {
+        resetGame();
+        return;
+    }
     
     if (!isShooting) {
         isShooting = true;
