@@ -1,0 +1,278 @@
+// 获取画布和上下文
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreElement = document.getElementById('score');
+
+// 加载图片
+const playerImg = new Image();
+const monsterImg = new Image();
+playerImg.src = 'tu/0.jpg';
+monsterImg.src = 'tu/1.jpg';
+
+// 设置画布大小为屏幕大小
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    // 更新玩家初始位置
+    player.x = canvas.width / 2 - player.width / 2;
+    player.y = canvas.height - player.height - 20;
+}
+
+// 监听屏幕大小变化
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// 游戏状态
+let score = 0;
+let gameOver = false;
+let lastShootTime = 0;
+const shootInterval = 250; // 射击间隔（毫秒）
+
+// 触摸控制变量
+let touchX = null;
+let isShooting = false;
+let shootingInterval = null;
+
+// 玩家飞机
+const player = {
+    x: canvas.width / 2,
+    y: canvas.height - 70,
+    width: 50,
+    height: 50,
+    speed: 5,
+    draw() {
+        ctx.drawImage(playerImg, this.x, this.y, this.width, this.height);
+    }
+};
+
+// 子弹数组
+let bullets = [];
+const bulletSpeed = 7;
+
+// 怪兽数组
+let monsters = [];
+const monsterSpeed = 2;
+
+// 控制状态
+const keys = {
+    ArrowLeft: false,
+    ArrowRight: false,
+    ArrowUp: false,
+    ArrowDown: false,
+    Space: false
+};
+
+// 监听键盘事件
+window.addEventListener('keydown', (e) => {
+    if (e.code in keys) {
+        keys[e.code] = true;
+        e.preventDefault(); // 防止页面滚动
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code in keys) {
+        keys[e.code] = false;
+    }
+});
+
+// 添加触摸事件监听
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    touchX = touch.clientX;
+    
+    // 开始连续射击
+    if (!isShooting) {
+        isShooting = true;
+        shootingInterval = setInterval(shoot, shootInterval);
+    }
+});
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const newTouchX = touch.clientX;
+    
+    // 移动飞机
+    const deltaX = newTouchX - touchX;
+    if (deltaX > 0 && player.x < canvas.width - player.width) {
+        player.x = Math.min(player.x + player.speed, canvas.width - player.width);
+    } else if (deltaX < 0 && player.x > 0) {
+        player.x = Math.max(player.x - player.speed, 0);
+    }
+    
+    touchX = newTouchX;
+});
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    touchX = null;
+    
+    // 停止连续射击
+    if (isShooting) {
+        isShooting = false;
+        clearInterval(shootingInterval);
+    }
+});
+
+// 创建怪兽
+function createMonster() {
+    if (gameOver) return;
+    
+    const monster = {
+        x: Math.random() * (canvas.width - 40),
+        y: -40,
+        width: 40,
+        height: 40,
+        draw() {
+            ctx.drawImage(monsterImg, this.x, this.y, this.width, this.height);
+        }
+    };
+    monsters.push(monster);
+}
+
+// 每秒创建一个怪兽
+setInterval(createMonster, 1000);
+
+// 发射子弹
+function shoot() {
+    const currentTime = Date.now();
+    if (currentTime - lastShootTime < shootInterval) return;
+    
+    lastShootTime = currentTime;
+    const bullet = {
+        x: player.x + player.width / 2 - 2.5,
+        y: player.y,
+        width: 5,
+        height: 15,
+        color: '#ffffff',
+        draw() {
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+        }
+    };
+    bullets.push(bullet);
+    
+    // 添加射击音效
+    playShootSound();
+}
+
+// 简单的音效系统
+function playShootSound() {
+    const oscillator = new (window.AudioContext || window.webkitAudioContext)().createOscillator();
+    const gainNode = oscillator.context.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(oscillator.context.destination);
+    oscillator.type = 'square';
+    oscillator.frequency.value = 800;
+    gainNode.gain.value = 0.1;
+    oscillator.start();
+    setTimeout(() => oscillator.stop(), 50);
+}
+
+// 检测碰撞
+function checkCollision(rect1, rect2) {
+    return rect1.x < rect2.x + rect2.width &&
+           rect1.x + rect1.width > rect2.x &&
+           rect1.y < rect2.y + rect2.height &&
+           rect1.y + rect1.height > rect2.y;
+}
+
+// 创建爆炸效果
+function createExplosion(x, y) {
+    ctx.fillStyle = '#ffff00';
+    ctx.beginPath();
+    ctx.arc(x, y, 20, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// 更新游戏状态
+function update() {
+    if (gameOver) return;
+
+    // 键盘控制（保留原有的键盘控制，以支持桌面端）
+    if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
+    if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
+    if (keys.ArrowUp && player.y > 0) player.y -= player.speed;
+    if (keys.ArrowDown && player.y < canvas.height - player.height) player.y += player.speed;
+    if (keys.Space) shoot();
+
+    // 更新子弹位置
+    bullets = bullets.filter(bullet => {
+        bullet.y -= bulletSpeed;
+        return bullet.y > 0;
+    });
+
+    // 更新怪兽位置
+    monsters = monsters.filter(monster => {
+        monster.y += monsterSpeed;
+        
+        // 检查与玩家的碰撞
+        if (checkCollision(monster, player)) {
+            gameOver = true;
+            createExplosion(player.x + player.width / 2, player.y + player.height / 2);
+        }
+
+        // 检查与子弹的碰撞
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            if (checkCollision(monster, bullets[i])) {
+                createExplosion(monster.x + monster.width / 2, monster.y + monster.height / 2);
+                bullets.splice(i, 1);
+                score += 10;
+                scoreElement.textContent = score;
+                return false;
+            }
+        }
+
+        return monster.y < canvas.height && !gameOver;
+    });
+}
+
+// 绘制游戏画面
+function draw() {
+    // 清空画布
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 绘制星空背景
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 100; i++) {
+        ctx.fillRect(
+            Math.random() * canvas.width,
+            Math.random() * canvas.height,
+            1,
+            1
+        );
+    }
+
+    // 绘制玩家
+    player.draw();
+
+    // 绘制子弹
+    bullets.forEach(bullet => bullet.draw());
+
+    // 绘制怪兽
+    monsters.forEach(monster => monster.draw());
+
+    // 游戏结束显示
+    if (gameOver) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('游戏结束!', canvas.width / 2, canvas.height / 2);
+        ctx.font = '24px Arial';
+        ctx.fillText('最终得分: ' + score, canvas.width / 2, canvas.height / 2 + 40);
+        ctx.fillText('按F5重新开始', canvas.width / 2, canvas.height / 2 + 80);
+    }
+}
+
+// 游戏主循环
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// 开始游戏
+gameLoop(); 
