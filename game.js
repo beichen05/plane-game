@@ -6,6 +6,7 @@ const scoreElement = document.getElementById('score');
 // 图片加载计数
 let loadedImages = 0;
 const totalImages = 3; // 增加了BOSS图片
+const maxRetries = 3; // 最大重试次数
 
 // 加载图片
 const playerImg = new Image();
@@ -17,13 +18,32 @@ function handleImageLoad() {
     loadedImages++;
     if (loadedImages === totalImages) {
         // 所有图片加载完成，开始游戏
+        document.getElementById('loading').style.display = 'none';
         startGame();
+    }
+}
+
+// 图片加载错误处理
+function handleImageError(img, src, retryCount = 0) {
+    if (retryCount < maxRetries) {
+        setTimeout(() => {
+            console.log(`重试加载图片: ${src}, 第${retryCount + 1}次`);
+            img.src = src + '?retry=' + Date.now();
+        }, 1000 * (retryCount + 1));
+    } else {
+        console.error(`图片加载失败: ${src}`);
+        // 使用备用图片或显示错误信息
+        document.getElementById('loading').textContent = '资源加载失败，请刷新重试';
     }
 }
 
 playerImg.onload = handleImageLoad;
 monsterImg.onload = handleImageLoad;
 bossImg.onload = handleImageLoad;
+
+playerImg.onerror = () => handleImageError(playerImg, 'tu/0.jpg');
+monsterImg.onerror = () => handleImageError(monsterImg, 'tu/1.jpg');
+bossImg.onerror = () => handleImageError(bossImg, 'tu/5.jpg');
 
 // 设置图片源
 playerImg.src = 'tu/0.jpg';
@@ -47,12 +67,16 @@ function resizeCanvas() {
     }
 }
 
+// 设备检测
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
 // 游戏状态
 let score = 0;
 let gameOver = false;
 let lastShootTime = 0;
 const shootInterval = 250; // 射击间隔（毫秒）
 let gameStarted = false;
+let autoShoot = isMobile; // 手机端自动射击，电脑端手动射击
 
 // 触摸控制变量
 let touchX = null;
@@ -67,8 +91,33 @@ const player = {
     height: 50,
     speed: 5,
     initialized: false,
+    lives: 3, // 添加生命值
+    invincible: false, // 无敌状态（被击中后短暂无敌）
     draw() {
+        if (this.invincible) {
+            ctx.globalAlpha = 0.5;
+        }
         ctx.drawImage(playerImg, this.x, this.y, this.width, this.height);
+        ctx.globalAlpha = 1.0;
+        
+        // 绘制生命值
+        for (let i = 0; i < this.lives; i++) {
+            ctx.drawImage(playerImg, 10 + i * 30, 40, 20, 20);
+        }
+    },
+    hit() {
+        if (this.invincible) return false;
+        this.lives--;
+        if (this.lives <= 0) {
+            gameOver = true;
+            return true;
+        }
+        // 被击中后短暂无敌
+        this.invincible = true;
+        setTimeout(() => {
+            this.invincible = false;
+        }, 2000);
+        return false;
     }
 };
 
@@ -136,7 +185,12 @@ const keys = {
 window.addEventListener('keydown', (e) => {
     if (e.code in keys) {
         keys[e.code] = true;
-        e.preventDefault(); // 防止页面滚动
+        e.preventDefault();
+    }
+    
+    // 空格键开始游戏
+    if (e.code === 'Space' && !gameStarted && !isMobile) {
+        gameStarted = true;
     }
 });
 
@@ -273,6 +327,15 @@ function resetGame() {
 function update() {
     if (gameOver || !gameStarted) return;
 
+    // 键盘控制
+    if (!isMobile) {
+        if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
+        if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
+        if (keys.ArrowUp && player.y > 0) player.y -= player.speed;
+        if (keys.ArrowDown && player.y < canvas.height - player.height) player.y += player.speed;
+        if (keys.Space) shoot();
+    }
+
     // 检查是否需要激活BOSS
     if (score >= 100 && !boss.active) {
         boss.active = true;
@@ -284,6 +347,8 @@ function update() {
     if (boss.active) {
         // BOSS左右移动
         boss.x += Math.sin(Date.now() / 1000) * boss.speed;
+        // 确保BOSS不会移出屏幕
+        boss.x = Math.max(0, Math.min(canvas.width - boss.width, boss.x));
         boss.shoot();
         
         // 更新BOSS子弹
@@ -292,21 +357,15 @@ function update() {
             
             // 检查是否击中玩家
             if (checkCollision(bullet, player)) {
-                gameOver = true;
-                createExplosion(player.x + player.width / 2, player.y + player.height / 2);
+                if (player.hit()) {
+                    createExplosion(player.x + player.width / 2, player.y + player.height / 2);
+                }
                 return false;
             }
             
             return bullet.y < canvas.height;
         });
     }
-
-    // 键盘控制（保留原有的键盘控制，以支持桌面端）
-    if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
-    if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
-    if (keys.ArrowUp && player.y > 0) player.y -= player.speed;
-    if (keys.ArrowDown && player.y < canvas.height - player.height) player.y += player.speed;
-    if (keys.Space) shoot();
 
     // 更新子弹位置
     bullets = bullets.filter(bullet => {
@@ -315,10 +374,12 @@ function update() {
         // 检查是否击中BOSS
         if (boss.active && checkCollision(bullet, boss)) {
             boss.health -= 10;
+            createExplosion(bullet.x, bullet.y);
             if (boss.health <= 0) {
                 boss.active = false;
                 score += 50;
                 scoreElement.textContent = score;
+                createExplosion(boss.x + boss.width / 2, boss.y + boss.height / 2);
             }
             return false;
         }
@@ -332,8 +393,10 @@ function update() {
         
         // 检查与玩家的碰撞
         if (checkCollision(monster, player)) {
-            gameOver = true;
-            createExplosion(player.x + player.width / 2, player.y + player.height / 2);
+            if (player.hit()) {
+                createExplosion(player.x + player.width / 2, player.y + player.height / 2);
+            }
+            return false;
         }
 
         // 检查与子弹的碰撞
@@ -349,6 +412,11 @@ function update() {
 
         return monster.y < canvas.height && !gameOver;
     });
+
+    // 手机端自动射击
+    if (isMobile && !gameOver) {
+        shoot();
+    }
 }
 
 // 绘制游戏画面
@@ -358,7 +426,11 @@ function draw() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (!gameStarted) {
-        // 显示加载中
+        // 显示开始界面
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '36px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(isMobile ? '触摸屏幕开始' : '按空格键开始', canvas.width / 2, canvas.height / 2);
         return;
     }
 
@@ -416,16 +488,24 @@ function gameLoop() {
 gameLoop();
 
 // 添加微信特定的触摸事件处理
+function getTouchPosition(e, rect) {
+    const touch = e.touches[0] || e.changedTouches[0];
+    return {
+        x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+        y: (touch.clientY - rect.top) * (canvas.height / rect.height)
+    };
+}
+
 canvas.addEventListener('touchstart', function(e) {
     e.preventDefault();
+    e.stopPropagation();
     if (!gameStarted) return;
     
-    const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    const touchX = touch.clientX - rect.left;
-    const touchY = touch.clientY - rect.top;
+    const pos = getTouchPosition(e, rect);
+    touchX = pos.x;
     
-    if (restartButton.isClicked(touchX, touchY)) {
+    if (restartButton.isClicked(pos.x, pos.y)) {
         resetGame();
         return;
     }
@@ -439,24 +519,26 @@ canvas.addEventListener('touchstart', function(e) {
 
 canvas.addEventListener('touchmove', function(e) {
     e.preventDefault();
+    e.stopPropagation();
     if (!gameStarted) return;
     
-    const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    const newTouchX = touch.clientX - rect.left;
+    const pos = getTouchPosition(e, rect);
     
-    const deltaX = newTouchX - touchX;
-    if (deltaX > 0 && player.x < canvas.width - player.width) {
-        player.x = Math.min(player.x + player.speed, canvas.width - player.width);
-    } else if (deltaX < 0 && player.x > 0) {
-        player.x = Math.max(player.x - player.speed, 0);
+    if (touchX !== null) {
+        const deltaX = pos.x - touchX;
+        if (deltaX > 0 && player.x < canvas.width - player.width) {
+            player.x = Math.min(player.x + player.speed, canvas.width - player.width);
+        } else if (deltaX < 0 && player.x > 0) {
+            player.x = Math.max(player.x - player.speed, 0);
+        }
     }
-    
-    touchX = newTouchX;
+    touchX = pos.x;
 }, { passive: false });
 
 canvas.addEventListener('touchend', function(e) {
     e.preventDefault();
+    e.stopPropagation();
     touchX = null;
     
     if (isShooting) {
